@@ -2351,7 +2351,7 @@ func (s *StateStore) CSIPluginDenormalize(ws memdb.WatchSet, plug *structs.CSIPl
 		ids[info.AllocID] = struct{}{}
 	}
 
-	jobs := map[string]int
+	jobs := map[string]int{}
 	for id := range ids {
 		alloc, err := s.AllocByID(ws, id)
 		if err != nil {
@@ -2360,7 +2360,7 @@ func (s *StateStore) CSIPluginDenormalize(ws memdb.WatchSet, plug *structs.CSIPl
 		if alloc == nil {
 			continue
 		}
-		jobs[alloc.JobID] = struct{}
+		jobs[alloc.JobID] = struct{}{}
 		plug.Allocations = append(plug.Allocations, alloc.Stub())
 	}
 
@@ -4510,58 +4510,39 @@ func (s *StateStore) updateJobScalingPolicies(index uint64, job *structs.Job, tx
 }
 
 func (s *StateStore) updateJobCSIPlugins(index uint64, job, prev *structs.Job, txn *memdb.Txn) error {
-	old := map[string]struct{}{}
-	new := map[string]struct{}{}
 
-	for _, tg := range prev.TaskGroups {
-		for _, t := range tg.Tasks {
-			if !t.CSIPluginConfig {
-				continue
+	plugIns := make(map[string]*structs.CSIPlugin)
+
+	loop := func(job *structs.Job, delete bool) error {
+		for _, tg := range job.TaskGroups {
+			for _, t := range tg.Tasks {
+				if !t.CSIPluginConfig {
+					continue
+				}
+
+				plugIn, ok := plugIns[t.CSIPluginConfig.ID]
+				if !ok {
+					plugIn, err = s.CSIPluginByID(t.CSIPluginConfig.ID)
+					if err != nil {
+						return fmt.Errorf("%v", err)
+					}
+					plugIn = plugIn.Copy()
+					plugIns[plugIn.ID] = plugIn
+				}
+
+				if delete {
+					plugIn.DeleteJob(job)
+				} else {
+					plugIn.AddJob(job)
+				}
 			}
-			old[t.CSIPluginConfig.ID] = struct{}{}
 		}
 	}
 
-	for _, tg := range job.TaskGroups {
-		for _, t := range tg.Tasks {
-			if !t.CSIPluginConfig {
-				continue
-			}
-			new[t.CSIPluginConfig.ID] = struct{}{}			
-		}
-	}
-	
-	upd := make(map[string]*structs.CSIPlugin)
-	for plugID := range old {
-		plug, err := s.CSIPluginByID(txn, plugID)
-		if if err != nil {
-			return fmt.Errorf("%v", err)
-		}
+	loop(prev, true)
+	loop(job, false)
 
-		plug = plug.Copy()
-		plug.DeleteJob(job)
-		upd[plugID] = plug
-	}
-
-	for plugID := range old {
-		plug, ok := upd[plugID]
-		if !ok {
-			plug, err = s.CSIPluginByID(txn, plugID)
-			if if err != nil {
-				return fmt.Errorf("%v", err)
-			}
-			plug = plug.Copy()			
-		}
-
-		plug.AddJob(job)
-		upd[plugID] = plug
-	}
-
-	for _, plug := range upd {
-		
-	}
 }
-
 
 // updateDeploymentWithAlloc is used to update the deployment state associated
 // with the given allocation. The passed alloc may be updated if the deployment
