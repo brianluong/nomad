@@ -709,6 +709,9 @@ type CSIPlugin struct {
 	// Allocations are populated by denormalize to show running allocations
 	Allocations []*AllocListStub
 
+	// Jobs are populated to by job update to support expected counts and the UI
+	Jobs map[string]*Job
+
 	// Cache the count of healthy plugins
 	ControllersHealthy int
 	NodesHealthy       int
@@ -872,6 +875,28 @@ func (p *CSIPlugin) DeleteAlloc(allocID, nodeID string) error {
 	}
 
 	return nil
+}
+
+// AddJob adds a job to the plugin and sets expected
+func (p *CSIPlugin) AddJob(job *Job) error {
+	// initialize here for compatibility with pre-0.12.4 plugins
+	if p.Jobs == nil {
+		p.Jobs = make(map[string]*Job)
+	}
+
+	p.Jobs[jobID] = job
+
+	if job.Type == JobTypeSystem {
+		// expected allocs + blocked evals
+	} else {
+		if controller {
+
+		}
+	}
+
+}
+
+func (p *CSIPlugin) DeleteJob(job *Job) error {
 }
 
 type CSIPluginListStub struct {
