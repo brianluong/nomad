@@ -713,8 +713,10 @@ type CSIPlugin struct {
 	Jobs map[string]*Job
 
 	// Cache the count of healthy plugins
-	ControllersHealthy int
-	NodesHealthy       int
+	ControllersHealthy  int
+	ControllersExpected int
+	NodesHealthy        int
+	NodesExpected       int
 
 	CreateIndex uint64
 	ModifyIndex uint64
@@ -878,19 +880,45 @@ func (p *CSIPlugin) DeleteAlloc(allocID, nodeID string) error {
 }
 
 // AddJob adds a job to the plugin and sets expected
-func (p *CSIPlugin) AddJob(job *Job) error {
+func (p *CSIPlugin) AddJob(job *Job, summary *JobSummary) error {
 	// initialize here for compatibility with pre-0.12.4 plugins
 	if p.Jobs == nil {
 		p.Jobs = make(map[string]*Job)
 	}
 
-	p.Jobs[jobID] = job
+	_, ok := p.Jobs[job.ID]
+	if ok && job.Type == JobTypeSystem {
+		return nil
+	}
+
+	p.Jobs[job.ID] = job
+
+	for _, tg := range job.TaskGroups {
+		for _, t := range tg.Tasks {
+			if t.CSIPluginConfig == nil ||
+				t.CSIPluginConfig.ID != p.ID {
+				continue
+			}
+
+			switch t.CSIPluginConfig.Type {
+			case CSIPluginTypeController, CSIPluginTypeMonolith:
+
+				if job.Type != JobTypeSystem {
+					p.ControllersExpected = tg.Count
+				} else {
+				}
+
+			case CSIPluginTypeNode, CSIPluginTypeMonolith:
+			default:
+			}
+		}
+	}
 
 	if job.Type == JobTypeSystem {
 		// expected allocs + blocked evals
 	} else {
 		if controller {
-
+			// some
 		}
 	}
 
