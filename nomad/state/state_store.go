@@ -1354,6 +1354,7 @@ func (s *StateStore) upsertJobImpl(index uint64, job *structs.Job, keepVersion b
 
 	// Check if the job already exists
 	existing, err := txn.First("jobs", "id", job.Namespace, job.ID)
+	var existingJob *Job
 	if err != nil {
 		return fmt.Errorf("job lookup failed: %v", err)
 	}
@@ -1363,7 +1364,7 @@ func (s *StateStore) upsertJobImpl(index uint64, job *structs.Job, keepVersion b
 		job.CreateIndex = existing.(*structs.Job).CreateIndex
 		job.ModifyIndex = index
 
-		existingJob := existing.(*structs.Job)
+		existingJob = existing.(*structs.Job)
 
 		// Bump the version unless asked to keep it. This should only be done
 		// when changing an internal field such as Stable. A spec change should
@@ -1410,6 +1411,10 @@ func (s *StateStore) upsertJobImpl(index uint64, job *structs.Job, keepVersion b
 	}
 
 	if err := s.updateJobScalingPolicies(index, job, txn); err != nil {
+		return fmt.Errorf("unable to update job scaling policies: %v", err)
+	}
+
+	if err := s.updateJobCSIPlugins(index, job, existingJob, txn); err != nil {
 		return fmt.Errorf("unable to update job scaling policies: %v", err)
 	}
 
@@ -2222,10 +2227,14 @@ func (s *StateStore) CSIVolumeDenormalizePlugins(ws memdb.WatchSet, vol *structs
 	vol.ControllerRequired = plug.ControllerRequired
 	vol.ControllersHealthy = plug.ControllersHealthy
 	vol.NodesHealthy = plug.NodesHealthy
-	// This number is incorrect! The expected number of node plugins is actually this +
-	// the number of blocked evaluations for the jobs controlling these plugins
-	vol.ControllersExpected = len(plug.Controllers)
-	vol.NodesExpected = len(plug.Nodes)
+
+	// This value may be stale, but stale is ok
+	if vol.ControllersExpected == 0 {
+		vol.ControllersExpected = len(plug.Controllers)
+	}
+	if vol.NodesExpected == 0 {
+		vol.NodesExpected = len(plug.Nodes)
+	}
 
 	vol.Schedulable = vol.NodesHealthy > 0
 	if vol.ControllerRequired {
@@ -2327,7 +2336,7 @@ func (s *StateStore) CSIPluginByID(ws memdb.WatchSet, id string) (*structs.CSIPl
 	return plug, nil
 }
 
-// CSIPluginDenormalize returns a CSIPlugin with allocation details
+// CSIPluginDenormalize returns a CSIPlugin with allocation details. Always called on a copy of the plugin.
 func (s *StateStore) CSIPluginDenormalize(ws memdb.WatchSet, plug *structs.CSIPlugin) (*structs.CSIPlugin, error) {
 	if plug == nil {
 		return nil, nil
@@ -2342,6 +2351,7 @@ func (s *StateStore) CSIPluginDenormalize(ws memdb.WatchSet, plug *structs.CSIPl
 		ids[info.AllocID] = struct{}{}
 	}
 
+	jobs := map[string]int
 	for id := range ids {
 		alloc, err := s.AllocByID(ws, id)
 		if err != nil {
@@ -2350,6 +2360,7 @@ func (s *StateStore) CSIPluginDenormalize(ws memdb.WatchSet, plug *structs.CSIPl
 		if alloc == nil {
 			continue
 		}
+		jobs[alloc.JobID] = struct{}
 		plug.Allocations = append(plug.Allocations, alloc.Stub())
 	}
 
@@ -4497,6 +4508,60 @@ func (s *StateStore) updateJobScalingPolicies(index uint64, job *structs.Job, tx
 
 	return nil
 }
+
+func (s *StateStore) updateJobCSIPlugins(index uint64, job, prev *structs.Job, txn *memdb.Txn) error {
+	old := map[string]struct{}{}
+	new := map[string]struct{}{}
+
+	for _, tg := range prev.TaskGroups {
+		for _, t := range tg.Tasks {
+			if !t.CSIPluginConfig {
+				continue
+			}
+			old[t.CSIPluginConfig.ID] = struct{}{}
+		}
+	}
+
+	for _, tg := range job.TaskGroups {
+		for _, t := range tg.Tasks {
+			if !t.CSIPluginConfig {
+				continue
+			}
+			new[t.CSIPluginConfig.ID] = struct{}{}			
+		}
+	}
+	
+	upd := make(map[string]*structs.CSIPlugin)
+	for plugID := range old {
+		plug, err := s.CSIPluginByID(txn, plugID)
+		if if err != nil {
+			return fmt.Errorf("%v", err)
+		}
+
+		plug = plug.Copy()
+		plug.DeleteJob(job)
+		upd[plugID] = plug
+	}
+
+	for plugID := range old {
+		plug, ok := upd[plugID]
+		if !ok {
+			plug, err = s.CSIPluginByID(txn, plugID)
+			if if err != nil {
+				return fmt.Errorf("%v", err)
+			}
+			plug = plug.Copy()			
+		}
+
+		plug.AddJob(job)
+		upd[plugID] = plug
+	}
+
+	for _, plug := range upd {
+		
+	}
+}
+
 
 // updateDeploymentWithAlloc is used to update the deployment state associated
 // with the given allocation. The passed alloc may be updated if the deployment
