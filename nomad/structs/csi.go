@@ -879,52 +879,69 @@ func (p *CSIPlugin) DeleteAlloc(allocID, nodeID string) error {
 	return nil
 }
 
-// AddJob adds a job to the plugin and sets expected
+// AddJob adds a job to the plugin and increments expected
 func (p *CSIPlugin) AddJob(job *Job, summary *JobSummary) error {
 	// initialize here for compatibility with pre-0.12.4 plugins
 	if p.Jobs == nil {
 		p.Jobs = make(map[string]*Job)
 	}
 
-	_, ok := p.Jobs[job.ID]
-	if ok && job.Type == JobTypeSystem {
+	p.Jobs[job.ID] = job
+
+	return p.UpdateExpectedWithJob(job, summary, false)
+}
+
+// DeleteJob removes the job from the plugin and decrements expected
+func (p *CSIPlugin) DeleteJob(job *Job, summary *JobSummary) error {
+	delete(p.Jobs, job.ID)
+	return p.UpdateExpectedWithJob(job, summary, true)
+}
+
+// UpdateExpectedWithJob maintains the expected instance count
+func (p *CSIPlugin) UpdateExpectedWithJob(job *Job, summary *JobSummary, decrement bool) error {
+	if summary == nil {
 		return nil
 	}
 
-	p.Jobs[job.ID] = job
-
 	for _, tg := range job.TaskGroups {
+		count := tg.Count
+		if job.Type == JobTypeSystem {
+			s, ok := summary.Summary[tg.Name]
+			if !ok {
+				continue
+			}
+
+			count = s.Running + s.Queued + s.Starting
+		}
+
 		for _, t := range tg.Tasks {
 			if t.CSIPluginConfig == nil ||
 				t.CSIPluginConfig.ID != p.ID {
 				continue
 			}
 
-			switch t.CSIPluginConfig.Type {
-			case CSIPluginTypeController, CSIPluginTypeMonolith:
-
-				if job.Type != JobTypeSystem {
-					p.ControllersExpected = tg.Count
+			// Change the correct plugin expected, monolith should change both
+			if t.CSIPluginConfig.Type == CSIPluginTypeController ||
+				t.CSIPluginConfig.Type == CSIPluginTypeMonolith {
+				if decrement {
+					p.ControllersExpected -= count
 				} else {
+					p.ControllersExpected += count
 				}
+			}
 
-			case CSIPluginTypeNode, CSIPluginTypeMonolith:
-			default:
+			if t.CSIPluginConfig.Type == CSIPluginTypeNode ||
+				t.CSIPluginConfig.Type == CSIPluginTypeMonolith {
+				if decrement {
+					p.NodesExpected -= count
+				} else {
+					p.NodesExpected += count
+				}
 			}
 		}
 	}
 
-	if job.Type == JobTypeSystem {
-		// expected allocs + blocked evals
-	} else {
-		if controller {
-			// some
-		}
-	}
-
-}
-
-func (p *CSIPlugin) DeleteJob(job *Job) error {
+	return nil
 }
 
 type CSIPluginListStub struct {
@@ -954,7 +971,8 @@ func (p *CSIPlugin) Stub() *CSIPluginListStub {
 }
 
 func (p *CSIPlugin) IsEmpty() bool {
-	return len(p.Controllers) == 0 && len(p.Nodes) == 0
+	return len(p.Controllers) == 0 &&
+		len(p.Nodes) == 0 && len(p.Jobs) == 0
 }
 
 type CSIPluginListRequest struct {
