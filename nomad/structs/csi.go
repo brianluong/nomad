@@ -710,8 +710,8 @@ type CSIPlugin struct {
 	Allocations []*AllocListStub
 
 	// Jobs are populated to by job update to support expected counts and the UI
-	ControllerJobs map[string]int
-	NodeJobs       map[string]int
+	ControllerJobs JobDescriptions
+	NodeJobs       JobDescriptions
 
 	// Cache the count of healthy plugins
 	ControllersHealthy  int
@@ -738,8 +738,8 @@ func NewCSIPlugin(id string, index uint64) *CSIPlugin {
 func (p *CSIPlugin) newStructs() {
 	p.Controllers = map[string]*CSIInfo{}
 	p.Nodes = map[string]*CSIInfo{}
-	p.ControllerJobs = map[string]int{}
-	p.NodeJobs = map[string]int{}
+	p.ControllerJobs = make(JobDescriptions)
+	p.NodeJobs = make(JobDescriptions)
 }
 
 func (p *CSIPlugin) Copy() *CSIPlugin {
@@ -892,21 +892,11 @@ func (p *CSIPlugin) DeleteAlloc(allocID, nodeID string) error {
 
 // AddJob adds a job to the plugin and increments expected
 func (p *CSIPlugin) AddJob(job *Job, summary *JobSummary) {
-	// initialize here for compatibility with pre-0.12.4 plugins
-	if p.ControllerJobs == nil {
-		p.ControllerJobs = map[string]int{}
-	}
-	if p.NodeJobs == nil {
-		p.NodeJobs = map[string]int{}
-	}
-
 	p.UpdateExpectedWithJob(job, summary, false)
 }
 
 // DeleteJob removes the job from the plugin and decrements expected
 func (p *CSIPlugin) DeleteJob(job *Job, summary *JobSummary) {
-	delete(p.ControllerJobs, job.ID)
-	delete(p.NodeJobs, job.ID)
 	p.UpdateExpectedWithJob(job, summary, true)
 }
 
@@ -938,31 +928,66 @@ func (p *CSIPlugin) UpdateExpectedWithJob(job *Job, summary *JobSummary, termina
 			if t.CSIPluginConfig.Type == CSIPluginTypeController ||
 				t.CSIPluginConfig.Type == CSIPluginTypeMonolith {
 				if terminal {
-					delete(p.ControllerJobs, job.ID)
+					p.ControllerJobs.Delete(job)
 				} else {
-					p.ControllerJobs[job.ID] = count
+					p.ControllerJobs.Add(job, count)
 				}
 			}
 
 			if t.CSIPluginConfig.Type == CSIPluginTypeNode ||
 				t.CSIPluginConfig.Type == CSIPluginTypeMonolith {
 				if terminal {
-					delete(p.NodeJobs, job.ID)
+					p.NodeJobs.Delete(job)
 				} else {
-					p.NodeJobs[job.ID] = count
+					p.NodeJobs.Add(job, count)
 				}
 			}
 		}
 	}
 
-	p.ControllersExpected = 0
-	for _, count := range p.ControllerJobs {
-		p.ControllersExpected += count
-	}
+	p.ControllersExpected = p.ControllerJobs.Count()
+	p.NodesExpected = p.NodeJobs.Count()
+}
 
-	p.NodesExpected = 0
-	for _, count := range p.NodeJobs {
-		p.NodesExpected += count
+type JobDescription struct {
+	Namespace string
+	JobID     string
+	Version   uint64
+	Expected  int
+}
+
+type JobNamespacedDescriptions map[string]JobDescription
+type JobDescriptions map[string]JobNamespacedDescriptions
+
+func (j JobDescriptions) Add(job *Job, expected int) {
+	if j == nil {
+		j = make(JobDescriptions)
+	}
+	if j[job.Namespace] == nil {
+		j[job.Namespace] = make(JobNamespacedDescriptions)
+	}
+	j[job.Namespace][job.ID] = JobDescription{
+		Namespace: job.Namespace,
+		JobID:     job.ID,
+		Version:   job.Version,
+		Expected:  expected,
+	}
+}
+
+func (j JobDescriptions) Count() int {
+	count := 0
+	for _, jnd := range j {
+		for _, jd := range jnd {
+			count += jd.Expected
+		}
+	}
+	return count
+}
+
+func (j JobDescriptions) Delete(job *Job) {
+	if j != nil &&
+		j[job.Namespace] != nil {
+		delete(j[job.Namespace], job.ID)
 	}
 }
 
