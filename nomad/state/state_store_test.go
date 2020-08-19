@@ -3605,7 +3605,7 @@ func TestStateStore_CSIPluginJobs(t *testing.T) {
 	// plugin was collected
 	plug, err = s.CSIPluginByID(ws, "foo")
 	require.NoError(t, err)
-	require.Nil(t, plug)
+	require.True(t, plug.IsEmpty())
 }
 
 func TestStateStore_RestoreCSIPlugin(t *testing.T) {

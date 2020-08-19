@@ -4845,6 +4845,10 @@ func (s *StateStore) updatePluginWithJobSummary(index uint64, summary *structs.J
 
 	ws := memdb.NewWatchSet()
 	tg := alloc.Job.LookupTaskGroup(alloc.TaskGroup)
+	if tg == nil {
+		return nil
+	}
+
 	for _, t := range tg.Tasks {
 		if t.CSIPluginConfig != nil {
 			pluginID := t.CSIPluginConfig.ID
