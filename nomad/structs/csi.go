@@ -984,6 +984,17 @@ func (j JobDescriptions) Count() int {
 	return count
 }
 
+func (j JobDescriptions) AsSlice() []JobDescription {
+	var out []JobDescription
+	for _, jnd := range j {
+		for _, jd := range jnd {
+			out = append(out, jd)
+		}
+	}
+
+	return out
+}
+
 func (j JobDescriptions) Delete(job *Job) {
 	if j != nil &&
 		j[job.Namespace] != nil {
