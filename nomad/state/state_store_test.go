@@ -3522,8 +3522,8 @@ func TestStateStore_CSIPluginMultiNodeUpdates(t *testing.T) {
 
 func TestStateStore_CSIPluginJobs(t *testing.T) {
 	s := testStateStore(t)
-	deleteNodes := CreateTestCSIPlugin(s, "foo")
-	defer deleteNodes()
+	// deleteNodes := CreateTestCSIPlugin(s, "foo")
+	// defer deleteNodes()
 
 	index := uint64(1001)
 
@@ -3578,6 +3578,11 @@ func TestStateStore_CSIPluginJobs(t *testing.T) {
 	}
 
 	err = s.UpsertAllocs(index, as)
+	require.NoError(t, err)
+	index++
+
+	// We use the summary to add
+	err = s.ReconcileJobSummaries(index)
 	require.NoError(t, err)
 	index++
 

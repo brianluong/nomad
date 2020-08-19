@@ -4512,7 +4512,6 @@ func (s *StateStore) updateJobScalingPolicies(index uint64, job *structs.Job, tx
 
 // updateJobCSIPlugins runs on job update indexes the job in the plugin
 func (s *StateStore) updateJobCSIPlugins(index uint64, job, prev *structs.Job, txn *memdb.Txn) error {
-
 	ws := memdb.NewWatchSet()
 	plugIns := make(map[string]*structs.CSIPlugin)
 
@@ -4525,11 +4524,16 @@ func (s *StateStore) updateJobCSIPlugins(index uint64, job, prev *structs.Job, t
 
 				plugIn, ok := plugIns[t.CSIPluginConfig.ID]
 				if !ok {
-					plugIn, err := s.CSIPluginByID(ws, t.CSIPluginConfig.ID)
+					p, err := s.CSIPluginByID(ws, t.CSIPluginConfig.ID)
 					if err != nil {
 						return fmt.Errorf("%v", err)
 					}
-					plugIn = plugIn.Copy()
+					if p == nil {
+						plugIn = structs.NewCSIPlugin(t.CSIPluginConfig.ID, index)
+					} else {
+						plugIn = p.Copy()
+						plugIn.ModifyIndex = index
+					}
 					plugIns[plugIn.ID] = plugIn
 				}
 
@@ -4544,11 +4548,30 @@ func (s *StateStore) updateJobCSIPlugins(index uint64, job, prev *structs.Job, t
 		return nil
 	}
 
-	err := loop(prev, true)
+	if prev != nil {
+		err := loop(prev, true)
+		if err != nil {
+			return fmt.Errorf("%v", err)
+		}
+	}
+
+	err := loop(job, false)
 	if err != nil {
 		return fmt.Errorf("%v", err)
 	}
-	return loop(job, false)
+
+	for _, plugIn := range plugIns {
+		err = txn.Insert("csi_plugins", plugIn)
+		if err != nil {
+			return fmt.Errorf("csi_plugins insert error: %v", err)
+		}
+	}
+
+	if err := txn.Insert("index", &IndexEntry{"csi_plugins", index}); err != nil {
+		return fmt.Errorf("index update failed: %v", err)
+	}
+
+	return nil
 }
 
 // updateDeploymentWithAlloc is used to update the deployment state associated
@@ -4781,9 +4804,9 @@ func (s *StateStore) updateSummaryWithAlloc(index uint64, alloc *structs.Allocat
 // allocation is updated or inserted with a terminal server status.
 func (s *StateStore) updatePluginWithAlloc(index uint64, alloc *structs.Allocation,
 	txn *memdb.Txn) error {
-	if !alloc.ServerTerminalStatus() {
-		return nil
-	}
+	// if !alloc.ServerTerminalStatus() {
+	// 	return nil
+	// }
 
 	ws := memdb.NewWatchSet()
 	tg := alloc.Job.LookupTaskGroup(alloc.TaskGroup)
@@ -4801,7 +4824,12 @@ func (s *StateStore) updatePluginWithAlloc(index uint64, alloc *structs.Allocati
 			}
 			plug = plug.Copy()
 
-			err = plug.DeleteAlloc(alloc.ID, alloc.NodeID)
+			if alloc.ServerTerminalStatus() {
+				err = plug.DeleteAlloc(alloc.ID, alloc.NodeID)
+			} else {
+				err = plug.AddAlloc(alloc.ID, alloc.NodeID)
+			}
+
 			if err != nil {
 				return err
 			}
@@ -4836,10 +4864,7 @@ func (s *StateStore) updatePluginWithJobSummary(index uint64, summary *structs.J
 			}
 			plug = plug.Copy()
 
-			err = plug.UpdateExpectedWithJob(alloc.Job, summary, alloc.ServerTerminalStatus())
-			if err != nil {
-				return err
-			}
+			plug.UpdateExpectedWithJob(alloc.Job, summary, alloc.ServerTerminalStatus())
 			err = updateOrGCPlugin(index, txn, plug)
 			if err != nil {
 				return err
