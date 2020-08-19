@@ -4804,9 +4804,9 @@ func (s *StateStore) updateSummaryWithAlloc(index uint64, alloc *structs.Allocat
 // allocation is updated or inserted with a terminal server status.
 func (s *StateStore) updatePluginWithAlloc(index uint64, alloc *structs.Allocation,
 	txn *memdb.Txn) error {
-	// if !alloc.ServerTerminalStatus() {
-	// 	return nil
-	// }
+	if !alloc.ServerTerminalStatus() {
+		return nil
+	}
 
 	ws := memdb.NewWatchSet()
 	tg := alloc.Job.LookupTaskGroup(alloc.TaskGroup)
@@ -4824,12 +4824,7 @@ func (s *StateStore) updatePluginWithAlloc(index uint64, alloc *structs.Allocati
 			}
 			plug = plug.Copy()
 
-			if alloc.ServerTerminalStatus() {
-				err = plug.DeleteAlloc(alloc.ID, alloc.NodeID)
-			} else {
-				err = plug.AddAlloc(alloc.ID, alloc.NodeID)
-			}
-
+			err = plug.DeleteAlloc(alloc.ID, alloc.NodeID)
 			if err != nil {
 				return err
 			}
@@ -4858,11 +4853,10 @@ func (s *StateStore) updatePluginWithJobSummary(index uint64, summary *structs.J
 				return err
 			}
 			if plug == nil {
-				// plugin may not have been created because it never
-				// became healthy, just move on
-				return nil
+				plug = structs.NewCSIPlugin(pluginID, index)
+			} else {
+				plug = plug.Copy()
 			}
-			plug = plug.Copy()
 
 			plug.UpdateExpectedWithJob(alloc.Job, summary, alloc.ServerTerminalStatus())
 			err = updateOrGCPlugin(index, txn, plug)
