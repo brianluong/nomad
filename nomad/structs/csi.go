@@ -737,6 +737,7 @@ func NewCSIPlugin(id string, index uint64) *CSIPlugin {
 func (p *CSIPlugin) newStructs() {
 	p.Controllers = map[string]*CSIInfo{}
 	p.Nodes = map[string]*CSIInfo{}
+	p.Jobs = map[string]*Job{}
 }
 
 func (p *CSIPlugin) Copy() *CSIPlugin {
@@ -750,6 +751,10 @@ func (p *CSIPlugin) Copy() *CSIPlugin {
 
 	for k, v := range p.Nodes {
 		out.Nodes[k] = v
+	}
+
+	for k, v := range p.Jobs {
+		out.Jobs[k] = v
 	}
 
 	return out
