@@ -249,7 +249,7 @@ func TestJobEndpoint_Register_ConnectIngressGateway_minimum(t *testing.T) {
 	testutil.WaitForLeader(t, s1.RPC)
 
 	// job contains the minimalist possible gateway service definition
-	job := mock.ConnectIngressGatewayJob("host")
+	job := mock.ConnectIngressGatewayJob("host", false)
 
 	// Create the register request
 	req := &structs.JobRegisterRequest{
@@ -324,7 +324,7 @@ func TestJobEndpoint_Register_ConnectIngressGateway_full(t *testing.T) {
 	testutil.WaitForLeader(t, s1.RPC)
 
 	// reconfigure job to fill in all the possible fields
-	job := mock.ConnectIngressGatewayJob("bridge")
+	job := mock.ConnectIngressGatewayJob("bridge", false)
 	job.TaskGroups[0].Services[0].Connect = &structs.ConsulConnect{
 		Gateway: &structs.ConsulGateway{
 			Proxy: &structs.ConsulGatewayProxy{

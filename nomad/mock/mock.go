@@ -669,7 +669,11 @@ func ConnectNativeJob(mode string) *structs.Job {
 	return job
 }
 
-func ConnectIngressGatewayJob(mode string) *structs.Job {
+// ConnectIngressGatewayJob creates a structs.Job that contains the definition
+// of a Consul Ingress Gateway service. The mode is the name of the network
+// mode assumed by the task group. If inject is true, a corresponding Task is
+// set on the group's Tasks (i.e. what the job would look like after job mutation).
+func ConnectIngressGatewayJob(mode string, inject bool) *structs.Job {
 	job := Job()
 	tg := job.TaskGroups[0]
 	tg.Networks = []*structs.NetworkResource{{
@@ -695,17 +699,23 @@ func ConnectIngressGatewayJob(mode string) *structs.Job {
 			},
 		},
 	}}
-	tg.Tasks = []*structs.Task{{ // normally injected
-		Name:          fmt.Sprintf("%s-%s", structs.ConnectIngressPrefix, "my-ingress-service"),
-		Kind:          structs.NewTaskKind(structs.ConnectIngressPrefix, "my-ingress-service"),
-		Driver:        "docker",
-		Config:        make(map[string]interface{}),
-		ShutdownDelay: 5 * time.Second,
-		LogConfig: &structs.LogConfig{
-			MaxFiles:      2,
-			MaxFileSizeMB: 2,
-		},
-	}}
+	// some tests need to assume the gateway proxy task has already been injected
+	if inject {
+		tg.Tasks = []*structs.Task{{
+			Name:          fmt.Sprintf("%s-%s", structs.ConnectIngressPrefix, "my-ingress-service"),
+			Kind:          structs.NewTaskKind(structs.ConnectIngressPrefix, "my-ingress-service"),
+			Driver:        "docker",
+			Config:        make(map[string]interface{}),
+			ShutdownDelay: 5 * time.Second,
+			LogConfig: &structs.LogConfig{
+				MaxFiles:      2,
+				MaxFileSizeMB: 2,
+			},
+		}}
+	} else {
+		// otherwise there are no tasks in the group yet
+		tg.Tasks = nil
+	}
 	return job
 }
 
@@ -986,7 +996,7 @@ func ConnectNativeAlloc(mode string) *structs.Allocation {
 
 func ConnectIngressGatewayAlloc(mode string) *structs.Allocation {
 	alloc := Alloc()
-	alloc.Job = ConnectIngressGatewayJob(mode)
+	alloc.Job = ConnectIngressGatewayJob(mode, true)
 	alloc.AllocatedResources.Shared.Networks = []*structs.NetworkResource{{
 		Mode: mode,
 		IP:   "10.0.0.1",

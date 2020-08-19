@@ -232,10 +232,17 @@ func groupConnectHook(job *structs.Job, g *structs.TaskGroup) error {
 			}
 
 		case service.Connect.IsGateway():
+			netHost := g.Networks[0].Mode == "host"
+			if !netHost && service.Connect.Gateway.Ingress != nil {
+				// Modify the gateway proxy service configuration to automatically
+				// do the correct envoy bind address plumbing when inside a net
+				// namespace, but only if things are not explicitly configured.
+				service.Connect.Gateway.Proxy = gatewayProxyForBridge(service.Connect.Gateway)
+			}
+
 			// inject the gateway task only if it does not yet already exist
 			if !hasGatewayTaskForService(g, service.Name) {
 				// use the default envoy image, for now there is no support for a custom task
-				netHost := g.Networks[0].Mode == "host"
 				task := newConnectGatewayTask(service.Name, netHost)
 				g.Tasks = append(g.Tasks, task)
 				task.Canonicalize(job, g)
@@ -248,13 +255,81 @@ func groupConnectHook(job *structs.Job, g *structs.TaskGroup) error {
 	return nil
 }
 
-func newConnectGatewayTask(serviceName string, nethost bool) *structs.Task {
+// gatewayProxyIsDefault returns false if any of these gateway proxy configuration
+// have been modified from their default values, indicating the operator wants
+// custom behavior. Otherwise, we assume the operator wants Nomad to do the Right
+// Thing, setting the configuration automatically.
+//
+// - envoy_gateway_no_default_bind
+// - envoy_gateway_bind_tagged_addresses
+// - envoy_gateway_bind_addresses
+func gatewayProxyIsDefault(proxy *structs.ConsulGatewayProxy) bool {
+	if proxy == nil {
+		return true
+	}
+	if !proxy.EnvoyGatewayNoDefaultBind &&
+		!proxy.EnvoyGatewayBindTaggedAddresses &&
+		len(proxy.EnvoyGatewayBindAddresses) == 0 {
+		return true
+	}
+	return false
+}
+
+// gatewayProxyForBridge scans an existing gateway proxy configuration and tweaks
+// it given an associated configuration entry so that it works as intended from
+// inside a network namespace.
+func gatewayProxyForBridge(gateway *structs.ConsulGateway) *structs.ConsulGatewayProxy {
+	if gateway == nil {
+		return nil
+	}
+
+	// operator has supplied custom proxy configuration, just use that without
+	// modification
+	if !gatewayProxyIsDefault(gateway.Proxy) {
+		return gateway.Proxy
+	}
+
+	// copy over unrelated fields if proxy block exists
+	proxy := new(structs.ConsulGatewayProxy)
+	if gateway.Proxy != nil {
+		proxy.ConnectTimeout = gateway.Proxy.ConnectTimeout
+		proxy.EnvoyDNSDiscoveryType = gateway.Proxy.EnvoyDNSDiscoveryType
+		proxy.Config = gateway.Proxy.Config
+	}
+
+	// magically set the fields where Nomad knows what to do
+	proxy.EnvoyGatewayNoDefaultBind = true
+	proxy.EnvoyGatewayBindTaggedAddresses = false
+	proxy.EnvoyGatewayBindAddresses = gatewayBindAddresses(gateway.Ingress)
+
+	return proxy
+}
+
+func gatewayBindAddresses(ingress *structs.ConsulIngressConfigEntry) map[string]*structs.ConsulGatewayBindAddress {
+	if ingress == nil || len(ingress.Listeners) == 0 {
+		return nil
+	}
+
+	addresses := make(map[string]*structs.ConsulGatewayBindAddress)
+	for _, listener := range ingress.Listeners {
+		port := listener.Port
+		for _, service := range listener.Services {
+			addresses[service.Name] = &structs.ConsulGatewayBindAddress{
+				Address: "0.0.0.0",
+				Port:    port,
+			}
+		}
+	}
+	return addresses
+}
+
+func newConnectGatewayTask(serviceName string, netHost bool) *structs.Task {
 	return &structs.Task{
 		// Name is used in container name so must start with '[A-Za-z0-9]'
 		Name:          fmt.Sprintf("%s-%s", structs.ConnectIngressPrefix, serviceName),
 		Kind:          structs.NewTaskKind(structs.ConnectIngressPrefix, serviceName),
 		Driver:        "docker",
-		Config:        connectGatewayDriverConfig(nethost),
+		Config:        connectGatewayDriverConfig(netHost),
 		ShutdownDelay: 5 * time.Second,
 		LogConfig: &structs.LogConfig{
 			MaxFiles:      2,
