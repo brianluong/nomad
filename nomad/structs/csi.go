@@ -710,7 +710,8 @@ type CSIPlugin struct {
 	Allocations []*AllocListStub
 
 	// Jobs are populated to by job update to support expected counts and the UI
-	Jobs map[string]*Job
+	ControllerJobs map[string]int
+	NodeJobs       map[string]int
 
 	// Cache the count of healthy plugins
 	ControllersHealthy  int
@@ -737,7 +738,8 @@ func NewCSIPlugin(id string, index uint64) *CSIPlugin {
 func (p *CSIPlugin) newStructs() {
 	p.Controllers = map[string]*CSIInfo{}
 	p.Nodes = map[string]*CSIInfo{}
-	p.Jobs = map[string]*Job{}
+	p.ControllerJobs = map[string]int{}
+	p.NodeJobs = map[string]int{}
 }
 
 func (p *CSIPlugin) Copy() *CSIPlugin {
@@ -753,8 +755,12 @@ func (p *CSIPlugin) Copy() *CSIPlugin {
 		out.Nodes[k] = v
 	}
 
-	for k, v := range p.Jobs {
-		out.Jobs[k] = v
+	for k, v := range p.ControllerJobs {
+		out.ControllerJobs[k] = v
+	}
+
+	for k, v := range p.NodeJobs {
+		out.NodeJobs[k] = v
 	}
 
 	return out
@@ -887,24 +893,26 @@ func (p *CSIPlugin) DeleteAlloc(allocID, nodeID string) error {
 // AddJob adds a job to the plugin and increments expected
 func (p *CSIPlugin) AddJob(job *Job, summary *JobSummary) {
 	// initialize here for compatibility with pre-0.12.4 plugins
-	if p.Jobs == nil {
-		p.Jobs = make(map[string]*Job)
+	if p.ControllerJobs == nil {
+		p.ControllerJobs = map[string]int{}
 	}
-
-	p.Jobs[job.ID] = nil
+	if p.NodeJobs == nil {
+		p.NodeJobs = map[string]int{}
+	}
 
 	p.UpdateExpectedWithJob(job, summary, false)
 }
 
 // DeleteJob removes the job from the plugin and decrements expected
 func (p *CSIPlugin) DeleteJob(job *Job, summary *JobSummary) {
-	delete(p.Jobs, job.ID)
+	delete(p.ControllerJobs, job.ID)
+	delete(p.NodeJobs, job.ID)
 	p.UpdateExpectedWithJob(job, summary, true)
 }
 
 // UpdateExpectedWithJob maintains the expected instance count
 // we use the summary to add non-allocation expected counts
-func (p *CSIPlugin) UpdateExpectedWithJob(job *Job, summary *JobSummary, decrement bool) {
+func (p *CSIPlugin) UpdateExpectedWithJob(job *Job, summary *JobSummary, terminal bool) {
 	if summary == nil {
 		return
 	}
@@ -929,22 +937,32 @@ func (p *CSIPlugin) UpdateExpectedWithJob(job *Job, summary *JobSummary, decreme
 			// Change the correct plugin expected, monolith should change both
 			if t.CSIPluginConfig.Type == CSIPluginTypeController ||
 				t.CSIPluginConfig.Type == CSIPluginTypeMonolith {
-				if decrement {
-					p.ControllersExpected -= count
+				if terminal {
+					delete(p.ControllerJobs, job.ID)
 				} else {
-					p.ControllersExpected += count
+					p.ControllerJobs[job.ID] = count
 				}
 			}
 
 			if t.CSIPluginConfig.Type == CSIPluginTypeNode ||
 				t.CSIPluginConfig.Type == CSIPluginTypeMonolith {
-				if decrement {
-					p.NodesExpected -= count
+				if terminal {
+					delete(p.NodeJobs, job.ID)
 				} else {
-					p.NodesExpected += count
+					p.NodeJobs[job.ID] = count
 				}
 			}
 		}
+	}
+
+	p.ControllersExpected = 0
+	for _, count := range p.ControllerJobs {
+		p.ControllersExpected += count
+	}
+
+	p.NodesExpected = 0
+	for _, count := range p.NodeJobs {
+		p.NodesExpected += count
 	}
 }
 
@@ -976,7 +994,9 @@ func (p *CSIPlugin) Stub() *CSIPluginListStub {
 
 func (p *CSIPlugin) IsEmpty() bool {
 	return len(p.Controllers) == 0 &&
-		len(p.Nodes) == 0 && len(p.Jobs) == 0
+		len(p.Nodes) == 0 &&
+		len(p.ControllerJobs) == 0 &&
+		len(p.NodeJobs) == 0
 }
 
 type CSIPluginListRequest struct {
