@@ -1207,6 +1207,11 @@ func updateOrGCPlugin(index uint64, txn *memdb.Txn, plug *structs.CSIPlugin) err
 // running, possibly deleting the plugin if it's no longer in use. It's called in DeleteJobTxn
 func (s *StateStore) deleteJobFromPlugins(index uint64, txn *memdb.Txn, job *structs.Job) error {
 	ws := memdb.NewWatchSet()
+	summary, err := s.JobSummaryByID(ws, job.Namespace, job.ID)
+	if err != nil {
+		return fmt.Errorf("error gettting job summary: %v", err)
+	}
+
 	allocs, err := s.AllocsByJob(ws, job.Namespace, job.ID, false)
 	if err != nil {
 		return fmt.Errorf("error getting allocations: %v", err)
@@ -1218,7 +1223,6 @@ func (s *StateStore) deleteJobFromPlugins(index uint64, txn *memdb.Txn, job *str
 	}
 
 	plugAllocs := []*pair{}
-	plugins := map[string]*structs.CSIPlugin{}
 
 	for _, a := range allocs {
 		tg := a.Job.LookupTaskGroup(a.TaskGroup)
@@ -1231,6 +1235,8 @@ func (s *StateStore) deleteJobFromPlugins(index uint64, txn *memdb.Txn, job *str
 			}
 		}
 	}
+
+	plugins := map[string]*structs.CSIPlugin{}
 
 	for _, x := range plugAllocs {
 		plug, ok := plugins[x.pluginID]
@@ -1255,6 +1261,7 @@ func (s *StateStore) deleteJobFromPlugins(index uint64, txn *memdb.Txn, job *str
 	}
 
 	for _, plug := range plugins {
+		plug.DeleteJob(job, summary)
 		err = updateOrGCPlugin(index, txn, plug)
 		if err != nil {
 			return err
@@ -1512,6 +1519,12 @@ func (s *StateStore) DeleteJobTxn(index uint64, namespace, jobID string, txn Txn
 		return err
 	}
 
+	// Cleanup plugins registered by this job, before we delete the summary
+	err = s.deleteJobFromPlugins(index, txn, job)
+	if err != nil {
+		return fmt.Errorf("deleting job from plugin: %v", err)
+	}
+
 	// Delete the job summary
 	if _, err = txn.DeleteAll("job_summary", "id", namespace, jobID); err != nil {
 		return fmt.Errorf("deleting job summary failed: %v", err)
@@ -1531,12 +1544,6 @@ func (s *StateStore) DeleteJobTxn(index uint64, namespace, jobID string, txn Txn
 	}
 	if err := txn.Insert("index", &IndexEntry{"scaling_event", index}); err != nil {
 		return fmt.Errorf("index update failed: %v", err)
-	}
-
-	// Cleanup plugins registered by this job
-	err = s.deleteJobFromPlugins(index, txn, job)
-	if err != nil {
-		return fmt.Errorf("deleting job from plugin: %v", err)
 	}
 
 	return nil
