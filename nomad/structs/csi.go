@@ -880,7 +880,7 @@ func (p *CSIPlugin) DeleteAlloc(allocID, nodeID string) error {
 }
 
 // AddJob adds a job to the plugin and increments expected
-func (p *CSIPlugin) AddJob(job *Job, summary *JobSummary) error {
+func (p *CSIPlugin) AddJob(job *Job, summary *JobSummary) {
 	// initialize here for compatibility with pre-0.12.4 plugins
 	if p.Jobs == nil {
 		p.Jobs = make(map[string]*Job)
@@ -888,19 +888,20 @@ func (p *CSIPlugin) AddJob(job *Job, summary *JobSummary) error {
 
 	p.Jobs[job.ID] = job
 
-	return p.UpdateExpectedWithJob(job, summary, false)
+	p.UpdateExpectedWithJob(job, summary, false)
 }
 
 // DeleteJob removes the job from the plugin and decrements expected
-func (p *CSIPlugin) DeleteJob(job *Job, summary *JobSummary) error {
+func (p *CSIPlugin) DeleteJob(job *Job, summary *JobSummary) {
 	delete(p.Jobs, job.ID)
-	return p.UpdateExpectedWithJob(job, summary, true)
+	p.UpdateExpectedWithJob(job, summary, true)
 }
 
 // UpdateExpectedWithJob maintains the expected instance count
-func (p *CSIPlugin) UpdateExpectedWithJob(job *Job, summary *JobSummary, decrement bool) error {
+// we use the summary to add non-allocation expected counts
+func (p *CSIPlugin) UpdateExpectedWithJob(job *Job, summary *JobSummary, decrement bool) {
 	if summary == nil {
-		return nil
+		return
 	}
 
 	for _, tg := range job.TaskGroups {
@@ -940,8 +941,6 @@ func (p *CSIPlugin) UpdateExpectedWithJob(job *Job, summary *JobSummary, decreme
 			}
 		}
 	}
-
-	return nil
 }
 
 type CSIPluginListStub struct {
