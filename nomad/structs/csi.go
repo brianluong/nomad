@@ -886,7 +886,7 @@ func (p *CSIPlugin) AddJob(job *Job, summary *JobSummary) {
 		p.Jobs = make(map[string]*Job)
 	}
 
-	p.Jobs[job.ID] = job
+	p.Jobs[job.ID] = nil
 
 	p.UpdateExpectedWithJob(job, summary, false)
 }
