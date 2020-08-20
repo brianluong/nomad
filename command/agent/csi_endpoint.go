@@ -378,6 +378,7 @@ func structsCSIInfoToApi(info *structs.CSIInfo) *api.CSIInfo {
 	}
 	out := &api.CSIInfo{
 		PluginID:                 info.PluginID,
+		AllocID:                  info.AllocID,
 		Healthy:                  info.Healthy,
 		HealthDescription:        info.HealthDescription,
 		UpdateTime:               info.UpdateTime,
