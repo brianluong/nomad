@@ -1020,9 +1020,9 @@ func (p *CSIPlugin) Stub() *CSIPluginListStub {
 		Provider:            p.Provider,
 		ControllerRequired:  p.ControllerRequired,
 		ControllersHealthy:  p.ControllersHealthy,
-		ControllersExpected: len(p.Controllers),
+		ControllersExpected: p.ControllersExpected,
 		NodesHealthy:        p.NodesHealthy,
-		NodesExpected:       len(p.Nodes),
+		NodesExpected:       p.NodesExpected,
 		CreateIndex:         p.CreateIndex,
 		ModifyIndex:         p.ModifyIndex,
 	}
