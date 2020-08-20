@@ -95,7 +95,7 @@ data "aws_ami" "linux" {
 
   filter {
     name   = "name"
-    values = ["nomad-e2e-*"]
+    values = ["test-nomad-e2e-*"]
   }
 
   filter {
@@ -110,7 +110,7 @@ data "aws_ami" "windows" {
 
   filter {
     name   = "name"
-    values = ["nomad-e2e-windows-2016*"]
+    values = ["test-nomad-e2e-windows-2016*"]
   }
 
   filter {
